@@ -246,12 +246,6 @@ move_note() {
     fi
 }
 
-print_completions() {
-    declare -f __nb_completions
-    echo "complete -F __nb_completions nb"
-}
-
-
 auto_save() {
     if [[ "$(read_auto_save)" == 1 ]]; then
         save_notes
@@ -267,6 +261,11 @@ check_note_name() {
     fi
 }
 
+print_completions() {
+    declare -f __nb_completions
+    echo "complete -o default -F __nb_completions nb"
+}
+
 __nb_completions()
 {
     local cur prev opts base command
@@ -275,25 +274,23 @@ __nb_completions()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    #
-    #  The basic options we'll complete.
-    #
-    opts="ls add cat view edit rm del mv default autosave save push"
 
-    #
-    #  Complete the arguments to some of the basic commands.
-    #
-    case "${prev}" in
-        add | cat | view | edit | rm | del | mv | default)
-            local notes="$("${command}" get_notes)"
-            COMPREPLY=( $(compgen -W "${notes}" -- ${cur}) )
-            return 0
-            ;;
-        *)
-        ;;
-    esac
+    if [[ "${COMP_CWORD}" == 1 ]]; then
+        # Working on the first word which is an action name.
+        # All are not listed, some are advanced and we don't want them to clutter the completions.
+        opts="ls add cat view edit rm del mv default save push"
+        COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
+    elif [[ "${COMP_CWORD}" == 2 ]]; then
+        # The second word only applies to some actions
+        case "${prev}" in
+            add | cat | view | edit | rm | del | mv | default)
+                local notes="$("${command}" get_notes)"
+                COMPREPLY=( $(compgen -W "${notes}" -- ${cur}) )
+                return 0
+                ;;
+        esac
+    fi
 
-   COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
    return 0
 }
 
