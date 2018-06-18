@@ -99,7 +99,7 @@ save_notes() {
     echo "--"
 
     git add .
-    git ci -m "Save at $(date)"
+    git commit -m "Save at $(date)"
 }
 
 push_notes() {
