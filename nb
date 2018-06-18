@@ -1,0 +1,411 @@
+#!/bin/bash
+#
+# nb(1) is a utility to create and manage simple notes.
+
+# Copyright 2018 Ben Bennett
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[[ -n $DEBUG ]] && set -x
+
+# Work out where our notes belong and go there
+NOTES_DIR=${NOTES_DIR:-"$HOME/notes"}
+cd "${NOTES_DIR}" || ( echo "Unable to cd to '${NOTES_DIR}'" >&2 && exit 1 )
+
+set -eou pipefail
+IFS=$'\n\t'
+
+CMD="$( basename $0 )"
+
+# The config file path and then the variables that come from it
+CONFIG_FILE=".config"
+default=""
+auto_save=0
+
+usage() {
+    cat <<EOF
+USAGE:
+  $CMD                     : list the notes
+  $CMD ls                  : list the notes
+  $CMD add [<NAME>]        : add a note to <NAME> (or the default)
+  $CMD cat [<NAME>]        : cat notes in <NAME> (or the default)
+  $CMD edit [<NAME>]       : open notes <NAME> in your editor
+  $CMD rm [<NAME>]         : delete notes <NAME>
+  $CMD del [<NAME>]        : delete notes <NAME>
+  $CMD mv <NAME1> <NAME2>  : rename notes from <NAME1> to <NAME2>
+
+  $CMD default <NAME>      : Sets the current note as the default
+                           Currently '$(read_default)'
+  $CMD autosave [0|1]      : Sets autosave on/off (must have a git repo set up)
+                           Currently '$(read_auto_save)'
+  $CMD save                : Saves the current notes to git
+  $CMD push                : Pushes the changes
+  $CMD pull                : Pulls the changes
+  $CMD completions         : Prints the completion function
+  $CMD get_notes           : List the completions (for use programattically)
+
+  $CMD -h,--help           : show this message
+
+ENV:
+  \$NOTES_DIR             : The directory in which notes are stored
+                           (defaults to '$HOME/notes', currently '$NOTES_DIR')
+EOF
+    exit 1
+}
+
+get_notes() {
+    shopt -s globstar
+
+    for f in **; do
+        if [[ -f "$f" ]] ; then
+            echo "$f"
+        fi
+    done
+}
+
+list_notes() {
+    set -u pipefail
+    local cur
+
+    local yellow darkbg normal
+    yellow=$(tput setaf 3)
+    darkbg=$(tput setab 0)
+    normal=$(tput sgr0)
+
+    cur=$(read_default)
+    for c in $(get_notes); do
+        if [[ -t 1 && "${c}" = "${cur}" ]]; then
+            echo " - ${darkbg}${yellow}${c}${normal}"
+        else
+            echo " - ${c}"
+        fi
+    done
+}
+
+save_notes() {
+    echo "--"
+
+    git add .
+    git ci -m "Save at $(date)"
+}
+
+push_notes() {
+    git push -q
+}
+
+pull_notes() {
+    git pull --ff-only
+}
+
+read_config() {
+    source "${CONFIG_FILE}"
+}
+
+write_config() {
+    cat > "${CONFIG_FILE}" <<EOF
+default="${default:-}"
+auto_save="${auto_save:-0}"
+EOF
+
+}
+
+read_default() {
+    echo "${default}"
+}
+
+save_default() {
+    local saved="$(read_default)"
+
+    if [[ "${saved}" != "${1}" ]]; then
+        default="${1}"
+        write_config
+    fi
+
+    echo "Set default note to '${1}'" >&2
+}
+
+read_auto_save() {
+    echo "${auto_save:-0}"
+}
+
+save_auto_save() {
+    local saved="$(read_auto_save)"
+
+    if [[ "${saved}" != "${1}" ]]; then
+        auto_save="${1}"
+        write_config
+    fi
+
+    echo "Set auto_save to '${1}'" >&2
+}
+
+add_note() {
+    local note="${1}"
+
+    check_note_name "${note}"
+
+    echo "Adding note \"${note}\".  Hit ctrl-d when done..." >&2
+
+    local note_dir="$(dirname "${note}")"
+    mkdir -p "${note_dir}"
+
+    cat >>"${note}"
+}
+
+cat_note() {
+    local note="${1}"
+
+    check_note_name "${note}"
+
+    if [[ -f "${note}" ]]; then
+        cat -- "${note}"
+    else
+        echo "" >&2
+    fi
+}
+
+edit_note() {
+    local note="${1}"
+
+    check_note_name "${note}"
+
+    ${VISUAL:-${EDITOR:-vi}} "${note}"
+}
+
+delete_note() {
+    local note="${1}"
+
+    check_note_name "${note}"
+
+    if [[ -f "${note}" ]]; then
+        echo "Deleting note \"${note}\"..." >&2
+        rm -- "${note}"
+    else
+        echo "No note \"${note}\"..." >&2
+        exit 1
+    fi
+
+    remove_empty_dir "${note}"
+}
+
+remove_empty_dir() {
+    local note_dir="$(dirname "${1}")"
+
+    while [[ "${note_dir}" != '.' ]]; do
+        rmdir --ignore-fail-on-non-empty "${note_dir}"
+        note_dir="$(dirname "$note_dir")"
+    done
+}
+
+move_note() {
+    local note_a="${1}"
+    local note_b="${2}"
+
+    check_note_name "${note_a}"
+    check_note_name "${note_b}"
+
+    if [[ -f "${note_a}" ]]; then
+        if [[ -f "${note_b}" ]]; then
+            echo "Note \"${note_b}\" already exists..." >&2
+            exit 1
+        else
+            echo "Moving note \"${note_a}\" to \"${note_b}\"..." >&2
+            mv -- "${note_a}" "${note_b}"
+            remove_empty_dir "${note_a}"
+        fi
+    else
+        echo "No note \"${note_a}\"..." >&2
+        exit 1
+    fi
+}
+
+print_completions() {
+    declare -f __nb_completions
+    echo "complete -F __nb_completions nb"
+}
+
+
+auto_save() {
+    if [[ "$(read_auto_save)" == 1 ]]; then
+        save_notes
+    fi
+}
+
+check_note_name() {
+    local name="${1}"
+
+    if ! [[ "${name}" =~ ^([-.0-9a-zA-Z]+/)*[-.0-9a-zA-Z]+$ ]]; then
+        echo "Bad note name '${name}'" >&2
+        exit 1
+    fi
+}
+
+__nb_completions()
+{
+    local cur prev opts base command
+    command="${1}"
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    #
+    #  The basic options we'll complete.
+    #
+    opts="ls add cat edit rm del mv default autosave save push"
+
+    #
+    #  Complete the arguments to some of the basic commands.
+    #
+    case "${prev}" in
+        add | cat | edit | rm | del | mv | default)
+            local notes="$("${command}" get_notes)"
+            COMPREPLY=( $(compgen -W "${notes}" -- ${cur}) )
+            return 0
+            ;;
+        *)
+        ;;
+    esac
+
+   COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
+   return 0
+}
+
+main() {
+    local cmd="${1:-}"
+    read_config
+
+    # Default
+    if [[ "$#" -eq 0 ]]; then
+        list_notes
+    #
+    # No args
+    elif [[ "${cmd}" =~ ^(ls|save|push|completions|get_notes)$ ]]; then
+        if [[ "$#" -gt 1 ]]; then
+            echo "error: too many arguments" >&2
+            usage
+        fi
+
+        case "${cmd}" in
+            ls)
+                list_notes
+                ;;
+            save)
+                save_notes
+                ;;
+            push)
+                push_notes
+                ;;
+            pull)
+                pull_notes
+                ;;
+            completions)
+                print_completions
+                ;;
+            get_notes)
+                get_notes
+                ;;
+        esac
+
+    #
+    # 1 (optional) arg
+    elif [[ "${1}" =~ ^(add|cat|edit|rm)$ ]]; then
+        local note
+
+        if [[ "$#" -eq 1 ]]; then
+            note="$(read_default)"
+        elif [[ "$#" -eq 2 ]]; then
+            note="${2}"
+        elif [[ "$#" -gt 2 ]]; then
+            echo "error: too many arguments" >&2
+            usage
+        fi
+
+        case "${cmd}" in
+            add)
+                add_note "${note}"
+                auto_save
+                ;;
+            cat)
+                cat_note "${note}"
+                auto_save
+                ;;
+            edit)
+                edit_note "${note}"
+                auto_save
+                ;;
+            rm | del)
+                delete_note "${note}"
+                auto_save
+                ;;
+        esac
+
+    #
+    # 1 (required) arg
+    elif [[ "${1}" =~ ^(default|autosave)$ ]]; then
+        if [[ "$#" -eq 1 ]]; then
+            echo "error: too few arguments" >&2
+            usage
+        elif [[ "$#" -eq 2 ]]; then
+            note="${2}"
+        elif [[ "$#" -gt 2 ]]; then
+            echo "error: too many arguments" >&2
+            usage
+        fi
+
+        case "${cmd}" in
+            default)
+                save_default "${note}"
+                auto_save
+                ;;
+            autosave)
+                save_auto_save "${2}"
+                auto_save
+                ;;
+        esac
+
+    #
+    # 2 (required) args:
+    #  mv
+    elif [[ "${1}" =~ ^(mv)$ ]]; then
+        if [[ "$#" -lt 3 ]]; then
+            echo "error: too few arguments" >&2
+            usage
+        elif [[ "$#" -eq 3 ]]; then
+            old_note="${2}"
+            new_note="${3}"
+        elif [[ "$#" -gt 3 ]]; then
+            echo "error: too many arguments" >&2
+            usage
+        fi
+
+        case "${cmd}" in
+            mv)
+                move_note "${old_note}" "${new_note}"
+                auto_save
+                ;;
+        esac
+
+    #
+    # Help!
+    elif [[ "${1}" =~ ^(-h|--help)$ ]]; then
+        usage
+
+    #
+    # We got something weird
+    else
+        echo "error: unexpected arguments" >&2
+        usage
+    fi
+}
+
+main "$@"
