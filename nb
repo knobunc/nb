@@ -34,11 +34,14 @@ auto_save=0
 
 usage() {
     cat <<EOF
+nb - Simple command line note management tool
+
 USAGE:
   $CMD                     : list the notes
   $CMD ls                  : list the notes
   $CMD add [<NAME>]        : add a note to <NAME> (or the default)
   $CMD cat [<NAME>]        : cat notes in <NAME> (or the default)
+  $CMD view [<NAME>]       : view notes in <NAME> with your pager
   $CMD edit [<NAME>]       : open notes <NAME> in your editor
   $CMD rm [<NAME>]         : delete notes <NAME>
   $CMD del [<NAME>]        : delete notes <NAME>
@@ -52,7 +55,7 @@ USAGE:
   $CMD push                : Pushes the changes
   $CMD pull                : Pulls the changes
   $CMD completions         : Prints the completion function
-  $CMD get_notes           : List the completions (for use programattically)
+  $CMD get_notes           : List the completions (for use programatically)
 
   $CMD -h,--help           : show this message
 
@@ -100,7 +103,7 @@ save_notes() {
 }
 
 push_notes() {
-    git push -q
+    git push
 }
 
 pull_notes() {
@@ -170,7 +173,21 @@ cat_note() {
     if [[ -f "${note}" ]]; then
         cat -- "${note}"
     else
-        echo "" >&2
+        echo "No note '${note}'." >&2
+        exit 1
+    fi
+}
+
+view_note() {
+    local note="${1}"
+
+    check_note_name "${note}"
+
+    if [[ -f "${note}" ]]; then
+        ${PAGER:-more} -- "${note}"
+    else
+        echo "No note '${note}'." >&2
+        exit 1
     fi
 }
 
@@ -179,7 +196,7 @@ edit_note() {
 
     check_note_name "${note}"
 
-    ${VISUAL:-${EDITOR:-vi}} "${note}"
+    ${VISUAL:-${EDITOR:-vi}} -- "${note}"
 }
 
 delete_note() {
@@ -244,7 +261,7 @@ auto_save() {
 check_note_name() {
     local name="${1}"
 
-    if ! [[ "${name}" =~ ^([-.0-9a-zA-Z]+/)*[-.0-9a-zA-Z]+$ ]]; then
+    if ! [[ "${name}" =~ ^([-._0-9a-zA-Z]+/)*[-._0-9a-zA-Z]+$ ]]; then
         echo "Bad note name '${name}'" >&2
         exit 1
     fi
@@ -261,13 +278,13 @@ __nb_completions()
     #
     #  The basic options we'll complete.
     #
-    opts="ls add cat edit rm del mv default autosave save push"
+    opts="ls add cat view edit rm del mv default autosave save push"
 
     #
     #  Complete the arguments to some of the basic commands.
     #
     case "${prev}" in
-        add | cat | edit | rm | del | mv | default)
+        add | cat | view | edit | rm | del | mv | default)
             local notes="$("${command}" get_notes)"
             COMPREPLY=( $(compgen -W "${notes}" -- ${cur}) )
             return 0
@@ -289,7 +306,7 @@ main() {
         list_notes
     #
     # No args
-    elif [[ "${cmd}" =~ ^(ls|save|push|completions|get_notes)$ ]]; then
+    elif [[ "${cmd}" =~ ^(ls|save|push|pull|completions|get_notes)$ ]]; then
         if [[ "$#" -gt 1 ]]; then
             echo "error: too many arguments" >&2
             usage
@@ -318,7 +335,7 @@ main() {
 
     #
     # 1 (optional) arg
-    elif [[ "${1}" =~ ^(add|cat|edit|rm)$ ]]; then
+    elif [[ "${1}" =~ ^(add|cat|view|edit|rm)$ ]]; then
         local note
 
         if [[ "$#" -eq 1 ]]; then
@@ -337,7 +354,9 @@ main() {
                 ;;
             cat)
                 cat_note "${note}"
-                auto_save
+                ;;
+            view)
+                view_note "${note}"
                 ;;
             edit)
                 edit_note "${note}"
