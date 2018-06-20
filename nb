@@ -54,6 +54,7 @@ USAGE:
   $CMD save                : Saves the current notes to git
   $CMD push                : Pushes the changes
   $CMD pull                : Pulls the changes
+  $CMD rebase              : Rebases the changes
   $CMD completions         : Prints the completion function
   $CMD get_notes           : List the completions (for use programatically)
 
@@ -108,6 +109,10 @@ push_notes() {
 
 pull_notes() {
     git pull --ff-only
+}
+
+rebase_notes() {
+    git rebase
 }
 
 read_config() {
@@ -303,7 +308,7 @@ main() {
         list_notes
     #
     # No args
-    elif [[ "${cmd}" =~ ^(ls|save|push|pull|completions|get_notes)$ ]]; then
+    elif [[ "${cmd}" =~ ^(ls|save|push|pull|rebase|completions|get_notes)$ ]]; then
         if [[ "$#" -gt 1 ]]; then
             echo "error: too many arguments" >&2
             usage
@@ -321,6 +326,9 @@ main() {
                 ;;
             pull)
                 pull_notes
+                ;;
+            rebase)
+                rebase_notes
                 ;;
             completions)
                 print_completions
