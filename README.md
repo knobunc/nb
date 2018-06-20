@@ -74,6 +74,12 @@ Remove a note:
 Deleting note "bar"...
 ```
 
+## Grouping notes
+
+If your notes have `/`s in them then it will make directories to
+create the nodes.  If all of the notes are removed from a directory,
+then the directory will be removed.
+
 ## Advanced usage
 
 ### Default note
